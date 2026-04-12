@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Biberbau Garten-Planer</title>
+<title>Biberbau Garten-Planer v4.0</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -422,17 +422,41 @@ body {
 }
 
 /* ========== RESPONSIVE ========== */
+/* --- Collapsible Groups --- */
+.group-title {
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.group-title:hover { color: var(--accent); }
+.group-chevron {
+  display: inline-block;
+  transition: transform 0.25s ease;
+  font-size: 0.7rem;
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.group-section.collapsed .group-chevron { transform: rotate(-90deg); }
+.group-section.collapsed .beete-grid { display: none; }
+.group-badge {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 @media (max-width: 600px) {
   .header h1 { font-size: 1.1rem; }
   .header h1 span { display: none; }
   .app { padding: 0.6rem; }
-  .beete-grid { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+  .beete-grid { grid-template-columns: 1fr; gap: 0.5rem; }
   .plant-picker { grid-template-columns: repeat(3, 1fr); }
   .modal { padding: 1rem; }
   .grid-cell { width: 38px; height: 38px; font-size: 1.4rem; }
 }
 @media (max-width: 360px) {
-  .beete-grid { grid-template-columns: 1fr; }
   .grid-cell { width: 42px; height: 42px; }
 }
 </style>
@@ -440,7 +464,7 @@ body {
 <body>
 
 <div class="header">
-  <h1>🦫 Biberbau <span>Garten-Planer</span></h1>
+  <h1>🦫 Biberbau <span>Garten-Planer v4.0</span></h1>
   <div class="header-actions">
     <div class="sync-indicator" id="syncDot" title="Sync-Status"></div>
     <button class="btn btn-sm" onclick="loadAll()" title="Neu laden">↻</button>
@@ -590,8 +614,11 @@ function render() {
 
   let html = "";
   for (const [groupName, beete] of Object.entries(groups)) {
-    html += `<div class="group-section">`;
-    html += `<div class="group-title">${esc(groupName)}</div>`;
+    const collapsed = isGroupCollapsed(groupName);
+    const beetCount = beete.length;
+    const plantCount = beete.reduce((sum, b) => sum + DATA.pflanzen.filter(p => p.beet === b.name && p.plant).length, 0);
+    html += `<div class="group-section${collapsed ? ' collapsed' : ''}" data-group="${esc(groupName)}">`;
+    html += `<div class="group-title" onclick="toggleGroup('${esc(groupName)}')">${esc(groupName)} <span class="group-badge">${beetCount} Beete · ${plantCount} Pflanzen</span><span class="group-chevron">▼</span></div>`;
     html += `<div class="beete-grid">`;
     for (const beet of beete) {
       html += renderBeetCard(beet);
@@ -639,6 +666,7 @@ function renderBeetCard(beet) {
         </div>
         <div class="beet-actions">
           <button class="btn btn-icon btn-sm" onclick="openAreaFillModal('${esc(beet.name)}')" title="Fläche bepflanzen">🌱</button>
+          <button class="btn btn-icon btn-sm" onclick="confirmClearBeet('${esc(beet.name)}')" title="Umgraben (alle Pflanzen entfernen)">🔄</button>
           <button class="btn btn-icon btn-sm" onclick="openEditBeetModal('${esc(beet.name)}')" title="Bearbeiten">✏️</button>
           <button class="btn btn-icon btn-sm btn-danger" onclick="confirmDeleteBeet('${esc(beet.name)}')" title="Löschen">🗑</button>
         </div>
@@ -1091,6 +1119,71 @@ function esc(s) {
 // ============================================================
 // CONFIG
 // ============================================================
+// ============================================================
+// COLLAPSIBLE GROUPS
+// ============================================================
+const COLLAPSE_KEY = "biberbau_collapsed_groups";
+
+function getCollapsedGroups() {
+  try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]"); }
+  catch { return []; }
+}
+
+function isGroupCollapsed(groupName) {
+  return getCollapsedGroups().includes(groupName);
+}
+
+function toggleGroup(groupName) {
+  const collapsed = getCollapsedGroups();
+  const idx = collapsed.indexOf(groupName);
+  if (idx >= 0) collapsed.splice(idx, 1);
+  else collapsed.push(groupName);
+  localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed));
+  const section = document.querySelector(`.group-section[data-group="${CSS.escape(groupName)}"]`);
+  if (section) section.classList.toggle("collapsed");
+}
+
+// ============================================================
+// CLEAR BEET (Umgraben)
+// ============================================================
+function confirmClearBeet(name) {
+  const plantCount = DATA.pflanzen.filter(p => p.beet === name && p.plant).length;
+  if (plantCount === 0) { toast("Beet ist bereits leer"); return; }
+  showModal(`
+    <h2>🔄 Beet umgraben?</h2>
+    <p style="margin:0.5rem 0;color:var(--text-dim)">Alle <strong>${plantCount}</strong> Pflanzen in "${esc(name)}" werden entfernt. Das Beet selbst bleibt erhalten.</p>
+    <div class="modal-buttons">
+      <button class="btn" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-danger" onclick="clearBeet('${esc(name)}')">Umgraben</button>
+    </div>
+  `);
+}
+
+async function clearBeet(name) {
+  closeModal();
+  const cells = DATA.pflanzen.filter(p => p.beet === name && p.plant);
+  if (!cells.length) return;
+
+  IS_SAVING = true;
+
+  // Optimistic local update
+  DATA.pflanzen = DATA.pflanzen.filter(p => p.beet !== name);
+  render();
+  toast(`⏳ ${cells.length} Felder werden geleert…`);
+
+  // Batch API calls
+  const batchSize = 5;
+  for (let i = 0; i < cells.length; i += batchSize) {
+    const batch = cells.slice(i, i + batchSize);
+    await Promise.all(batch.map(c =>
+      apiPost({ action: "clearCell", beet: name, col: Number(c.col), row: Number(c.row) })
+    ));
+  }
+
+  IS_SAVING = false;
+  toast(`✓ "${name}" umgegraben — ${cells.length} Felder geleert`);
+}
+
 function saveApiUrl() {
   const url = document.getElementById("apiUrlInput").value.trim();
   if (!url) { toast("Bitte URL eingeben"); return; }
