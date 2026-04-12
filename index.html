@@ -762,6 +762,12 @@ async function saveCell(beet, col, row, w, h) {
   const notes   = document.getElementById("cellNotes").value;
   const mode    = document.querySelector('input[name="spreadMode"]:checked')?.value || "single";
 
+  // Read spread-range values BEFORE closing the modal (which destroys the DOM)
+  const colFrom = Math.max(1, parseInt(document.getElementById("spreadColFrom")?.value) || 1) - 1;
+  const colTo   = Math.min(w, parseInt(document.getElementById("spreadColTo")?.value) || w) - 1;
+  const rowFrom = Math.max(1, parseInt(document.getElementById("spreadRowFrom")?.value) || 1) - 1;
+  const rowTo   = Math.min(h, parseInt(document.getElementById("spreadRowTo")?.value) || h) - 1;
+
   closeModal();
 
   // ── Single field ──────────────────────────────────────────
@@ -793,10 +799,6 @@ async function saveCell(beet, col, row, w, h) {
       cells.unshift({ col, row });
     }
   } else if (mode === "range") {
-    const colFrom = Math.max(1, parseInt(document.getElementById("spreadColFrom")?.value) || 1) - 1;
-    const colTo   = Math.min(w, parseInt(document.getElementById("spreadColTo")?.value) || w) - 1;
-    const rowFrom = Math.max(1, parseInt(document.getElementById("spreadRowFrom")?.value) || 1) - 1;
-    const rowTo   = Math.min(h, parseInt(document.getElementById("spreadRowTo")?.value) || h) - 1;
     for (let r = rowFrom; r <= rowTo; r++) {
       for (let c = colFrom; c <= colTo; c++) {
         const existing = getCellData(beet, c, r);
