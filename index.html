@@ -329,6 +329,71 @@ body {
 @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
 @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(10px); } }
 
+/* ========== SPREAD SECTION ========== */
+.spread-section {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.spread-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.04em;
+}
+.spread-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.spread-opt {
+  display: flex !important;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  margin-top: 0 !important;
+}
+.spread-opt input[type="radio"] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.spread-range {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.spread-range-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.spread-range-row span.label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  width: 55px;
+  flex-shrink: 0;
+}
+.spread-range-row input {
+  width: 52px !important;
+  text-align: center;
+}
+.spread-range-row span.sep {
+  color: var(--text-muted);
+}
+.spread-range-row span.total {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 /* ========== RESPONSIVE ========== */
 @media (max-width: 600px) {
   .header h1 { font-size: 1.1rem; }
@@ -561,6 +626,10 @@ function closeModal() {
 function openCellModal(beet, col, row) {
   const cell = getCellData(beet, col, row);
   const selectedPlant = cell ? cell.plant : "";
+  const beetObj = DATA.beete.find(b => b.name === beet);
+  const w = beetObj ? Number(beetObj.width) || 4 : 4;
+  const h = beetObj ? Number(beetObj.height) || 7 : 7;
+  const today = new Date().toISOString().split("T")[0];
 
   let pickerHtml = PLANTS.map(p => {
     const sel = p.id === selectedPlant ? " selected" : "";
@@ -578,17 +647,58 @@ function openCellModal(beet, col, row) {
     <label>Sorte / Variante</label>
     <input type="text" id="cellVariety" value="${esc(cell?.variety || '')}">
     <label>Gepflanzt am</label>
-    <input type="date" id="cellPlanted" value="${esc(cell?.planted || '')}">
+    <input type="date" id="cellPlanted" value="${esc(cell?.planted || today)}">
     <label>Ernte (erwartet)</label>
     <input type="date" id="cellHarvest" value="${esc(cell?.harvest || '')}">
     <label>Notizen</label>
     <textarea id="cellNotes">${esc(cell?.notes || '')}</textarea>
+
+    <div class="spread-section">
+      <div class="spread-label">Auf weitere Felder anwenden?</div>
+      <div class="spread-options">
+        <label class="spread-opt">
+          <input type="radio" name="spreadMode" value="single" checked onchange="toggleSpreadRange()">
+          Nur dieses Feld
+        </label>
+        <label class="spread-opt">
+          <input type="radio" name="spreadMode" value="allEmpty" onchange="toggleSpreadRange()">
+          Alle leeren Felder dieses Beetes
+        </label>
+        <label class="spread-opt">
+          <input type="radio" name="spreadMode" value="range" onchange="toggleSpreadRange()">
+          Bereich wählen
+        </label>
+      </div>
+      <div class="spread-range" id="spreadRange" style="display:none;">
+        <div class="spread-range-row">
+          <span class="label">Spalten</span>
+          <input type="number" id="spreadColFrom" value="1" min="1" max="${w}">
+          <span class="sep">–</span>
+          <input type="number" id="spreadColTo" value="${w}" min="1" max="${w}">
+          <span class="total">von ${w}</span>
+        </div>
+        <div class="spread-range-row">
+          <span class="label">Reihen</span>
+          <input type="number" id="spreadRowFrom" value="1" min="1" max="${h}">
+          <span class="sep">–</span>
+          <input type="number" id="spreadRowTo" value="${h}" min="1" max="${h}">
+          <span class="total">von ${h}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-buttons">
       ${cell && cell.plant ? `<button class="btn btn-danger btn-sm" onclick="clearCell('${esc(beet)}',${col},${row})">Feld leeren</button>` : ''}
       <button class="btn" onclick="closeModal()">Abbrechen</button>
-      <button class="btn btn-accent" onclick="saveCell('${esc(beet)}',${col},${row})">Speichern</button>
+      <button class="btn btn-accent" onclick="saveCell('${esc(beet)}',${col},${row},${w},${h})">Speichern</button>
     </div>
   `);
+}
+
+function toggleSpreadRange() {
+  const mode = document.querySelector('input[name="spreadMode"]:checked')?.value;
+  const el = document.getElementById("spreadRange");
+  if (el) el.style.display = mode === "range" ? "flex" : "none";
 }
 
 function selectPlantInPicker(el, id) {
@@ -599,28 +709,83 @@ function selectPlantInPicker(el, id) {
   if (hidden) hidden.value = id;
 }
 
-async function saveCell(beet, col, row) {
+async function saveCell(beet, col, row, w, h) {
   const plant = document.getElementById("cellPlant").value;
   if (!plant) { toast("Bitte eine Pflanze wählen"); return; }
-  const body = {
-    action: "setCell",
-    beet, col, row,
-    plant,
-    variety: document.getElementById("cellVariety").value,
-    planted: document.getElementById("cellPlanted").value,
-    harvest: document.getElementById("cellHarvest").value,
-    notes: document.getElementById("cellNotes").value,
-  };
+
+  const variety = document.getElementById("cellVariety").value;
+  const planted = document.getElementById("cellPlanted").value;
+  const harvest = document.getElementById("cellHarvest").value;
+  const notes   = document.getElementById("cellNotes").value;
+  const mode    = document.querySelector('input[name="spreadMode"]:checked')?.value || "single";
+
   closeModal();
+
+  // ── Single field ──────────────────────────────────────────
+  if (mode === "single") {
+    const body = { action: "setCell", beet, col, row, plant, variety, planted, harvest, notes };
+    const idx = DATA.pflanzen.findIndex(p => p.beet === beet && Number(p.col) === col && Number(p.row) === row);
+    const entry = { beet, col, row, plant, variety, planted, harvest, notes };
+    if (idx >= 0) DATA.pflanzen[idx] = entry;
+    else DATA.pflanzen.push(entry);
+    render();
+    const res = await apiPost(body);
+    if (res && !res.error) toast("✓ Gespeichert");
+    else toast("❌ Fehler beim Speichern");
+    return;
+  }
+
+  // ── Multi-field modes ─────────────────────────────────────
+  let cells = [];
+
+  if (mode === "allEmpty") {
+    for (let r = 0; r < h; r++) {
+      for (let c = 0; c < w; c++) {
+        const existing = getCellData(beet, c, r);
+        if (!existing || !existing.plant) cells.push({ col: c, row: r });
+      }
+    }
+    // Always include the cell the user clicked, even if already filled
+    if (!cells.some(cell => cell.col === col && cell.row === row)) {
+      cells.unshift({ col, row });
+    }
+  } else if (mode === "range") {
+    const colFrom = Math.max(1, parseInt(document.getElementById("spreadColFrom")?.value) || 1) - 1;
+    const colTo   = Math.min(w, parseInt(document.getElementById("spreadColTo")?.value) || w) - 1;
+    const rowFrom = Math.max(1, parseInt(document.getElementById("spreadRowFrom")?.value) || 1) - 1;
+    const rowTo   = Math.min(h, parseInt(document.getElementById("spreadRowTo")?.value) || h) - 1;
+    for (let r = rowFrom; r <= rowTo; r++) {
+      for (let c = colFrom; c <= colTo; c++) {
+        const existing = getCellData(beet, c, r);
+        if (!existing || !existing.plant) cells.push({ col: c, row: r });
+      }
+    }
+    // Always include the cell the user clicked
+    if (!cells.some(cell => cell.col === col && cell.row === row)) {
+      cells.unshift({ col, row });
+    }
+  }
+
+  if (!cells.length) { toast("Keine passenden Felder gefunden"); return; }
+
   // Optimistic update
-  const existing = DATA.pflanzen.findIndex(p => p.beet === beet && Number(p.col) === col && Number(p.row) === row);
-  const entry = { beet, col, row, plant: body.plant, variety: body.variety, planted: body.planted, harvest: body.harvest, notes: body.notes };
-  if (existing >= 0) DATA.pflanzen[existing] = entry;
-  else DATA.pflanzen.push(entry);
+  cells.forEach(({ col: c, row: r }) => {
+    const idx = DATA.pflanzen.findIndex(p => p.beet === beet && Number(p.col) === c && Number(p.row) === r);
+    const entry = { beet, col: c, row: r, plant, variety, planted, harvest, notes };
+    if (idx >= 0) DATA.pflanzen[idx] = entry;
+    else DATA.pflanzen.push(entry);
+  });
   render();
-  const r = await apiPost(body);
-  if (r && !r.error) toast("✓ Gespeichert");
-  else toast("❌ Fehler beim Speichern");
+  toast(`⏳ ${cells.length} Felder werden gespeichert…`);
+
+  const batchSize = 5;
+  for (let i = 0; i < cells.length; i += batchSize) {
+    const batch = cells.slice(i, i + batchSize);
+    await Promise.all(batch.map(({ col: c, row: r }) =>
+      apiPost({ action: "setCell", beet, col: c, row: r, plant, variety, planted, harvest, notes })
+    ));
+  }
+  toast(`✓ ${cells.length} Felder bepflanzt`);
 }
 
 async function clearCell(beet, col, row) {
