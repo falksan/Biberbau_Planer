@@ -131,6 +131,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  cursor: pointer;
 }
 .group-title::before { content: ''; display: block; width: 3px; height: 1em; background: var(--accent); border-radius: 2px; }
 .beete-grid {
@@ -357,6 +358,24 @@ body {
 @keyframes toastOut { to { opacity: 0; transform: translateX(-50%) translateY(10px); } }
 
 /* ========== RESPONSIVE ========== */
+.group-chevron {
+  display: inline-block;
+  transition: transform 0.25s ease;
+  font-size: 0.7rem;
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.group-section.collapsed .group-chevron { transform: rotate(-90deg); }
+.group-section.collapsed .beete-grid { display: none; }
+.group-badge {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 @media (max-width: 600px) {
   .header h1 { font-size: 1.1rem; }
   .header h1 span { display: none; }
@@ -380,11 +399,9 @@ body {
 
 <div class="app" id="app">
   <div class="config-banner" id="configBanner" style="display:none">
-    ⚠️ <strong>Apps Script URL fehlt.</strong> Bitte trage deine Google Apps Script Web-App-URL unten ein:<br>
-    <label style="margin-top:0.5rem">
-      <input type="text" id="apiUrlInput" placeholder="https://script.google.com/macros/s/…/exec" style="margin-top:0.3rem">
-    </label>
-    <button class="btn btn-accent btn-sm" style="margin-top:0.5rem" onclick="saveApiUrl()">Speichern</button>
+    ⚠️ <strong>Apps Script URL fehlt.</strong>
+    <input type="text" id="apiUrlInput" placeholder="URL hier einfügen">
+    <button class="btn btn-accent btn-sm" onclick="saveApiUrl()">Speichern</button>
   </div>
 
   <div class="toolbar">
@@ -396,19 +413,18 @@ body {
 
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
-
 <script>
 // ============================================================
-// CONFIG
+// CONFIG & STATE
 // ============================================================
 const STORAGE_KEY = "biberbau_api_url";
 let API_URL = localStorage.getItem(STORAGE_KEY) || "";
 let DATA = { beete: [], pflanzen: [] };
 let IS_SAVING = false;
+const COLLAPSED_GROUPS_KEY = "biberbau_collapsed_groups";
 
 // ============================================================
-// PLANTS DATABASE
-// toxic: true = 🔴 (Tödlich/Hochtoxisch für Cooper)
+// PLANTS DATABASE (Aktualisiert)
 // ============================================================
 const PLANTS = [
   { id: "tomate",       emoji: "🍅", name: "Tomate",        toxic: false },
@@ -462,143 +478,140 @@ const PLANTS = [
   { id: "sonstiges",    emoji: "🌱", name: "Sonstiges",     toxic: false },
 ];
 
-function getPlant(id) {
-  return PLANTS.find(p => p.id === id) || { id, emoji: "🌱", name: id, toxic: false };
-}
-
 // ============================================================
-// API & HELPERS
+// CORE FUNCTIONS
 // ============================================================
-function setSyncState(state) {
-  const dot = document.getElementById("syncDot");
-  if(dot) dot.className = "sync-indicator" + (state ? " " + state : "");
-}
+function getPlant(id) { return PLANTS.find(p => p.id === id) || { id, emoji: "🌱", name: id, toxic: false }; }
+function esc(s) { if(!s) return ""; return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function setSyncState(s) { const d = document.getElementById("syncDot"); if(d) d.className = "sync-indicator " + (s||""); }
+function toast(m) { const r = document.getElementById("toastRoot"); const t = document.createElement("div"); t.className = "toast"; t.textContent = m; r.appendChild(t); setTimeout(() => t.remove(), 2500); }
 
-function esc(str) {
-  if (!str) return "";
-  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function toast(msg) {
-  const root = document.getElementById("toastRoot");
-  const t = document.createElement("div");
-  t.className = "toast";
-  t.textContent = msg;
-  root.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
-}
-
-// ============================================================
-// CORE LOGIC
-// ============================================================
 async function loadAll() {
-  if (!API_URL) {
-    document.getElementById("configBanner").style.display = "block";
-    return;
-  }
+  if (IS_SAVING || !API_URL) { if(!API_URL) document.getElementById("configBanner").style.display="block"; return; }
   setSyncState("syncing");
   try {
     const r = await fetch(API_URL + "?action=getAll");
     const d = await r.json();
     if (d && !d.error) { DATA = d; render(); }
     setSyncState("");
-  } catch (e) {
-    setSyncState("error");
-    console.error(e);
-  }
+  } catch (e) { setSyncState("error"); }
 }
 
 function render() {
   const container = document.getElementById("beeteContainer");
-  if (!DATA.beete.length) {
-    container.innerHTML = '<p style="text-align:center;padding:3rem 0;color:var(--text-muted)">Keine Beete gefunden.</p>';
-    return;
-  }
+  if (!DATA.beete.length) { container.innerHTML = '<p style="text-align:center;padding:3rem 0;color:var(--text-muted)">Keine Beete vorhanden.</p>'; return; }
 
-  let html = '<div class="beete-grid">';
-  DATA.beete.forEach(beet => {
-    const w = Number(beet.width) || 4;
-    const h = Number(beet.height) || 7;
-    const plantsInBeet = DATA.pflanzen.filter(p => p.beet === beet.name && p.plant);
-    
-    html += `<div class="beet-card">
-      <div class="beet-header">
-        <div class="beet-name">${esc(beet.name)}</div>
-        <div class="beet-meta">${w}x${h} · ${plantsInBeet.length} Pflanzen</div>
-      </div>
-      <div class="grid-container" style="grid-template-columns: 18px repeat(${w}, 44px);">
-        <div class="grid-corner"></div>`;
-    
-    for(let c=0; c<w; c++) html += `<div class="grid-col-label">${String.fromCharCode(65+c)}</div>`;
-
-    for(let r=0; r<h; r++) {
-      html += `<div class="grid-row-label">${r+1}</div>`;
-      for(let c=0; c<w; c++) {
-        const cell = DATA.pflanzen.find(p => p.beet === beet.name && Number(p.col) === c && Number(p.row) === r);
-        const pDef = cell ? getPlant(cell.plant) : null;
-        const filled = pDef ? " filled" : "";
-        const dot = (pDef && pDef.toxic) ? '<span class="toxic-dot"></span>' : "";
-        html += `<div class="grid-cell${filled}" onclick="openCellModal('${esc(beet.name)}',${c},${r})">${pDef ? pDef.emoji : ""}${dot}</div>`;
-      }
-    }
+  const groups = {};
+  DATA.beete.forEach(b => { const g = b.group || "Ungroupiert"; if(!groups[g]) groups[g] = []; groups[g].push(b); });
+  
+  let html = "";
+  for (const [groupName, beete] of Object.entries(groups)) {
+    const collapsed = isGroupCollapsed(groupName);
+    html += `<div class="group-section${collapsed ? ' collapsed' : ''}" data-group="${esc(groupName)}">
+      <div class="group-title" onclick="toggleGroup('${esc(groupName)}')">${esc(groupName)} <span class="group-chevron">▼</span></div>
+      <div class="beete-grid">`;
+    beete.forEach(beet => { html += renderBeetCard(beet); });
     html += `</div></div>`;
-  });
-  html += '</div>';
+  }
   container.innerHTML = html;
 }
 
-function openCellModal(beetName, col, row) {
-  const cell = DATA.pflanzen.find(p => p.beet === beetName && Number(p.col) === col && Number(p.row) === row);
-  const currentPlantId = cell ? cell.plant : "";
+function renderBeetCard(beet) {
+  const w = Number(beet.width) || 4;
+  const h = Number(beet.height) || 7;
+  const plants = DATA.pflanzen.filter(p => p.beet === beet.name && p.plant);
   
-  let pickerHtml = '<div class="plant-picker">';
+  let g = `<div class="beet-card">
+    <div class="beet-header">
+      <div><div class="beet-name">${esc(beet.name)}</div><div class="beet-meta">${w}x${h} · ${plants.length} Pflanzen</div></div>
+      <div class="beet-actions">
+        <button class="btn btn-icon btn-sm" onclick="openAreaFillModal('${esc(beet.name)}')">🌱</button>
+        <button class="btn btn-icon btn-sm" onclick="confirmClearBeet('${esc(beet.name)}')">🔄</button>
+        <button class="btn btn-icon btn-sm" onclick="openEditBeetModal('${esc(beet.name)}')">✏️</button>
+      </div>
+    </div>
+    <div class="grid-container" style="grid-template-columns: 18px repeat(${w}, 44px);">
+      <div class="grid-corner"></div>`;
+  for(let c=0; c<w; c++) g += `<div class="grid-col-label">${String.fromCharCode(65+c)}</div>`;
+  for(let r=0; r<h; r++) {
+    g += `<div class="grid-row-label">${r+1}</div>`;
+    for(let c=0; c<w; c++) {
+      const cell = DATA.pflanzen.find(p => p.beet === beet.name && Number(p.col) === c && Number(p.row) === r);
+      const pDef = cell ? getPlant(cell.plant) : null;
+      const dot = (pDef && pDef.toxic) ? '<span class="toxic-dot"></span>' : "";
+      g += `<div class="grid-cell${pDef?' filled':''}" onclick="openCellModal('${esc(beet.name)}',${c},${r})">${pDef?pDef.emoji:""}${dot}</div>`;
+    }
+  }
+  return g + `</div></div>`;
+}
+
+// ============================================================
+// MODALS & EVENTS
+// ============================================================
+function toggleGroup(n) {
+  const c = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || "[]");
+  const i = c.indexOf(n);
+  if(i > -1) c.splice(i, 1); else c.push(n);
+  localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(c));
+  render();
+}
+function isGroupCollapsed(n) { return JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || "[]").includes(n); }
+
+function openCellModal(beet, col, row) {
+  const cell = DATA.pflanzen.find(p => p.beet === beet && Number(p.col) === col && Number(p.row) === row);
+  let picker = '<div class="plant-picker">';
   PLANTS.forEach(p => {
-    const sel = p.id === currentPlantId ? " selected" : "";
-    pickerHtml += `<div class="plant-option${sel}" onclick="saveCell('${esc(beetName)}',${col},${row},'${p.id}')">
-      <span class="emoji">${p.emoji}</span>
-      <span>${p.name}</span>
-      ${p.toxic ? '<span class="toxic-badge">⚠️</span>' : ""}
+    picker += `<div class="plant-option${(cell&&cell.plant===p.id)?' selected':''}" onclick="saveCell('${esc(beet)}',${col},${row},'${p.id}')">
+      <span class="emoji">${p.emoji}</span><span>${p.name}</span>${p.toxic?'<span class="toxic-badge">⚠️</span>':''}
     </div>`;
   });
-  pickerHtml += `<div class="plant-option" onclick="saveCell('${esc(beetName)}',${col},${row},'')">❌ Leeren</div></div>`;
-
+  picker += `<div class="plant-option" onclick="saveCell('${esc(beet)}',${col},${row},'')">❌</div></div>`;
+  
   document.getElementById("modalRoot").innerHTML = `
     <div class="modal-overlay" onclick="closeModal()">
       <div class="modal" onclick="event.stopPropagation()">
-        <h2>Pflanze wählen (${String.fromCharCode(65+col)}${row+1})</h2>
-        ${pickerHtml}
-        <div class="modal-buttons"><button class="btn" onclick="closeModal()">Abbrechen</button></div>
+        <h2>${String.fromCharCode(65+col)}${row+1} bepflanzen</h2>${picker}
       </div>
     </div>`;
 }
 
-async function saveCell(beet, col, row, plantId) {
-  closeModal();
-  setSyncState("syncing");
-  try {
-    await fetch(API_URL, {
-      method: "POST",
-      body: JSON.stringify({ action: "putPlant", beet, col, row, plant: plantId, variety: "" })
-    });
-    await loadAll();
-    toast("Gespeichert");
-  } catch (e) {
-    setSyncState("error");
-  }
+async function saveCell(beet, col, row, plant) {
+  closeModal(); setSyncState("syncing");
+  await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "putPlant", beet, col, row, plant }) });
+  await loadAll(); toast("Gespeichert");
+}
+
+function openAddBeetModal() {
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" onclick="closeModal()">
+      <div class="modal" onclick="event.stopPropagation()">
+        <h2>Neues Beet</h2>
+        <label>Name</label><input type="text" id="nb_name">
+        <label>Gruppe</label><input type="text" id="nb_group" placeholder="z.B. Gemüsegarten">
+        <label>Breite (Spalten)</label><input type="number" id="nb_w" value="4">
+        <label>Höhe (Reihen)</label><input type="number" id="nb_h" value="7">
+        <div class="modal-buttons">
+          <button class="btn" onclick="closeModal()">Abbrechen</button>
+          <button class="btn btn-accent" onclick="saveNewBeet()">Erstellen</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveNewBeet() {
+  const name = document.getElementById("nb_name").value.trim();
+  const group = document.getElementById("nb_group").value.trim();
+  const width = document.getElementById("nb_w").value;
+  const height = document.getElementById("nb_h").value;
+  if(!name) return;
+  closeModal(); setSyncState("syncing");
+  await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "addBeet", name, group, width, height }) });
+  await loadAll();
 }
 
 function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+function saveApiUrl() { const v = document.getElementById("apiUrlInput").value.trim(); if(v) { localStorage.setItem(STORAGE_KEY, v); location.reload(); } }
 
-function saveApiUrl() {
-  const val = document.getElementById("apiUrlInput").value.trim();
-  if(val) {
-    localStorage.setItem(STORAGE_KEY, val);
-    API_URL = val;
-    location.reload();
-  }
-}
-
-// Init
 loadAll();
 </script>
 </body>
